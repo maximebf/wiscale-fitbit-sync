@@ -103,11 +103,12 @@ def do_sync(since):
 
     print "Sync done until %s" % since
     print ""
-    if not config.has_section('sync'):
-        config.add_section('sync')
-    config.set('sync', 'lastupdate', since)
-    with open(options.config, 'wb') as f:
-        config.write(f)
+    if not options.test:
+        if not config.has_section('sync'):
+            config.add_section('sync')
+        config.set('sync', 'lastupdate', since)
+        with open(options.config, 'wb') as f:
+            config.write(f)
     return since
 
 lastupdate=0
