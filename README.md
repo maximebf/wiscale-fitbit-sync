@@ -40,3 +40,14 @@ You can run the program in daemon mode. It will run forever and
 perform a sync every 24h (this can be changed using *--interval=SECONDS*).
 
     $ ./sync.py --daemon --interval=3600
+
+## Server mode and notifications
+
+The Withings API has a notification system where you can register an
+url that will be called when a new measure is added.
+
+The program has a builtin http server to receive these notifications,
+you only need to provide the url through which the server will be 
+reachable.
+
+    $ ./sync.py --server --port=8000
