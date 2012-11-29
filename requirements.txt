@@ -1,0 +1,3 @@
+withings
+requests
+requests-oauth
