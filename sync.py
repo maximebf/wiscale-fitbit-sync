@@ -11,7 +11,9 @@ import urlparse
 
 
 parser = OptionParser()
-parser.add_option('-l', '--lastupdate', dest='lastupdate', type='int', help="UNIX Timestamp since last update")
+parser.add_option('-a', '--startdate', dest='startdate', type='int', help="UNIX Timestamp")
+parser.add_option('-b', '--enddate', dest='enddate', type='int', help="UNIX Timestamp")
+parser.add_option('-r', '--reset', dest='reset', action="store_true", default=False, help="Resync all data")
 parser.add_option('-d', '--daemon', dest='daemon', action="store_true", default=False, help="Run as daemon")
 parser.add_option('-i', '--interval', dest='interval', type='int', default=86400, help="Interval between syncs in seconds when in daemon mode")
 parser.add_option('-c', '--config', dest='config', default='config.cfg', help="Config file")
@@ -19,6 +21,8 @@ parser.add_option('-t', '--test', dest='test', action="store_true", default=Fals
 parser.add_option('-u', '--setup', dest='setup', action="store_true", default=False, help="Setup mode, only setup authentification")
 parser.add_option('-s', '--server', dest='server', action="store_true", default=False, help="Server mode, sync when notified")
 parser.add_option('-p', '--port', dest='port', type='int', default=8000, help="Server port, default 8000")
+parser.add_option('-w', '--weight-only', dest='weight_only', action="store_true", default=False, help="Only sync your weight")
+parser.add_option('-f', '--fat-only', dest='fat_only', action="store_true", default=False, help="Only sync your fat weight")
 
 (options, args) = parser.parse_args()
 
@@ -100,23 +104,56 @@ if not config.has_section('sync'):
     config.add_section('sync')
 
 
-def do_sync(**kwargs):
-    print "Starting sync with params %s" % kwargs
-    measures = withings_client.get_measures(**kwargs)
-    measures.reverse()
+def do_sync(startdate=None, enddate=None):
+    params = {}
+    if startdate and enddate:
+        print "Syncing measures between %s and %s" % (startdate, enddate)
+        params = {'startdate': startdate, 'enddate': enddate}
+    elif startdate:
+        print "Syncing measures since %s" % startdate
+        params = {'startdate': startdate}
+    elif enddate:
+        print "Syncing measures until %s" % enddate
+        params = {'enddate': enddate}
+    else:
+        print "Syncing all measures"
 
+    try:
+        measures = withings_client.get_measures(**params)
+    except Exception as e:
+        print "An error occured while fetching data from Withings: %s" % e
+        return None
+
+    print "Withings returned %s new measures" % len(measures)
+
+    measures.reverse()
+    lastupdate = None
+    nb_measures = 0
     for m in measures:
         if not m.is_measure():
             continue
-        print "%s timestamp=%s weight=%s" % (m.date.isoformat(' '), m.data['date'], m.weight)
-        if not options.test and not m.weight is None:
-            fitbit_client.post('/user/-/body/log/weight', {
-                'weight': unicode(m.weight),
-                'date': unicode(m.date.date().isoformat()),
-                'time': unicode(m.date.time().isoformat())})
 
-    lastupdate = int(time.mktime(measures.updatetime.timetuple()))
-    print "Sync done until %s" % lastupdate
+        print "%s timestamp=%s weight=%s fat=%s" % (m.date.isoformat(' '), m.data['date'], 
+                                                    m.weight, m.fat_mass_weight)
+
+        try:
+            if not options.test and not options.fat_only and not m.weight is None:
+                fitbit_client.post('/user/-/body/log/weight', {
+                    'weight': unicode(m.weight),
+                    'date': unicode(m.date.date().isoformat()),
+                    'time': unicode(m.date.time().isoformat())})
+            if not options.test and not options.weight_only and not m.fat_mass_weight is None:
+                fitbit_client.post('/user/-/body/log/fat', {
+                    'fat': unicode(m.fat_mass_weight),
+                    'date': unicode(m.date.date().isoformat()),
+                    'time': unicode(m.date.time().isoformat())})
+        except Exception as e:
+            print "An error occured while sending data to Fitbit: %s" % e
+            break
+        lastupdate = m.data['date']
+        nb_measures += 1
+
+    print "Synced %s measures (lastupdate=%s)" % (nb_measures, lastupdate)
     return lastupdate
 
 
@@ -130,7 +167,7 @@ class NotifyRequestHandler(BaseHTTPRequestHandler):
         startdate = int(qs['startdate'][0])
         enddate = int(qs['enddate'][0])
         print "Notification: new measures between %s and %s" % (startdate, enddate)
-        do_sync(startdate=startdate, enddate=enddate)
+        do_sync(startdate, enddate)
         self.send_response(200)
 
 
@@ -150,12 +187,15 @@ def start_server(port):
         server.server_close()
     print "Unsubscribing to notifications from Withings"
     withings_client.unsubscribe(server_url)
+    return None
 
 
-def start_daemon(lastupdate, interval):
-    print "Starting daemon mode, syncing every %s seconds" % interval
+def start_daemon(startdate, interval):
+    print "Starting daemon mode, syncing since %s every %s seconds" % (startdate, interval)
     while True:
-        lastupdate = do_sync(lastupdate=lastupdate)
+        r = do_sync(startdate)
+        if not r is None:
+            lastupdate = r
         try:
             time.sleep(interval)
         except (KeyboardInterrupt, SystemExit):
@@ -165,24 +205,31 @@ def start_daemon(lastupdate, interval):
 
 # Sync
 
-lastupdate = 0
-if not options.lastupdate is None:
-    lastupdate = options.lastupdate
-elif config.has_option('sync', 'lastupdate'):
-    lastupdate = config.getint('sync', 'lastupdate')
+if not options.reset and options.startdate is None and options.enddate is None:
+    if config.has_option('sync', 'lastupdate'):
+        options.startdate = config.getint('sync', 'lastupdate') + 1
 
 if options.test:
     print "Test mode, data WILL NOT be sent to Fitbit"
 
+if options.weight_only:
+    print "Only syncing weight measurements"
+elif options.fat_only:
+    print "Only tracking fat measurements"
+
+lastupdate = None
 if options.server:
-    start_server(options.port)
+    lastupdate = start_server(options.port)
 elif options.daemon:
-    lastupdate = start_daemon(lastupdate, options.interval)
+    lastupdate = start_daemon(options.startdate, options.interval)
+elif options.reset:
+    lastupdate = do_sync()
 else:
-    lastupdate = do_sync(lastupdate=lastupdate)
+    lastupdate = do_sync(options.startdate, options.enddate)
 
 if not options.test:
     print "Writing configuration file in %s" % options.config
-    config.set('sync', 'lastupdate', lastupdate)
+    if not lastupdate is None:
+        config.set('sync', 'lastupdate', lastupdate)
     with open(options.config, 'wb') as f:
         config.write(f)
