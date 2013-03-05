@@ -1,5 +1,5 @@
 import requests
-from requests.auth import OAuth1
+from requests_oauthlib import OAuth1
 from oauth_hook import OAuthHook
 from urlparse import parse_qs
 import json
@@ -47,7 +47,8 @@ class FitbitApi(object):
         self.oauth = OAuth1(unicode(credentials.consumer_key), unicode(credentials.consumer_secret),
                     unicode(credentials.access_token), unicode(credentials.access_token_secret),
                     signature_type='auth_header')
-        self.client = requests.session(auth=self.oauth)
+        self.client = requests.Session()
+        self.client.auth = self.oauth
 
     def request(self, method, action, **kwargs):
         r = self.client.request(method, '%s%s.json' % (self.URL, action), **kwargs)
