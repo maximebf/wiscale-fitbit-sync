@@ -20,18 +20,18 @@ name is *config.cfg* and can be changed using *--config=FILENAME*.
 On your first use, it will ask for all the needed authentification
 information. To launch the program in setup mode only use:
 
-    $ ./client.py --setup
+    $ ./sync.py --setup
 
 This will not perform a sync.
 
 If you want to see which measurements will be synced, you can run
 the program in test mode, which will NOT send data to Fitbit:
 
-    $ ./client.py --test
+    $ ./sync.py --test
 
 To sync the measurements, simply run the program:
 
-    $ ./client.py
+    $ ./sync.py
 
 The program will automatically sync measurements added since the last
 sync. The last synchronization date is stored in the config file.
